@@ -938,8 +938,8 @@
       // Se tine con el color de la LUZ, no con el del cuerpo: los tonos de cuerpo son
       // casi blancos y multiplicar por ellos no cambia nada, que es justo por lo que
       // las luces no se distinguian entre si.
-      var cuerpo = ASSETS.tinte(IMG.bicho, sk.glow, 0.72);
-      var alaImg = ASSETS.tinte(IMG.ala, sk.glow, 0.45);
+      var cuerpo = ASSETS.tinte(IMG.bicho, sk.glow, 0.95);
+      var alaImg = ASSETS.tinte(IMG.ala, sk.glow, 0.55);
 
       var bw = r * 4.4;
       var bh = bw * IMG.bicho.height / IMG.bicho.width;
@@ -1218,11 +1218,11 @@
     // pantalla: el logo cambia de alto segun el ancho y si no, las cosas se pisan.
     shadowText(T('tap'), cx, abajoTitulo + X(4.5), 3, 'rgba(255,255,255,0.80)');
     shadowText(T('best') + ' ' + S.save.best, cx, abajoTitulo + X(10), 3, 'rgba(255,255,255,0.58)');
-    S.menuMascotaY = abajoTitulo + X(17);
+    S.menuMascotaY = abajoTitulo + X(19.5);
 
     // objetivos
     var ms = S.save.missions || [];
-    var top = (abajoTitulo + X(31)) / V.u;
+    var top = (abajoTitulo + X(33)) / V.u;
     shadowText(T('missions'), cx, X(top - 3.4), 2.4, 'rgba(255,255,255,0.55)');
     for (var i = 0; i < ms.length; i++) {
       var m = ms[i];
@@ -1262,9 +1262,12 @@
           text('+' + m.rw, X(x + w - 3), cyFila, 2.1, '#8effc8', 'right');
         }
       } else {
+        // El color depende de si el numero cae sobre la madera clara (ya rellena)
+        // o sobre la oscura: marron sobre oscuro no se lee.
         var numW = textWidth('+' + m.rw, 2.1);
-        text('+' + m.rw, X(x + w - 3.2), cyFila, 2.1, sobreMadera ? '#6b4a1e' : '#ffe08a', 'right');
-        pollenIcon(X(x + w - 3.2) - numW - X(1.6), cyFila, X(0.85));
+        var colNum = !sobreMadera ? '#ffe08a' : (prog > 0.86 ? '#6b4a1e' : '#f2dfb6');
+        text('+' + m.rw, X(x + w - 3.2), cyFila, 2.1, colNum, 'right');
+        pollenIcon(X(x + w - 3.2) - numW - X(2.6), cyFila, X(0.8));
       }
     }
 
