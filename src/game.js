@@ -131,6 +131,7 @@
     pressed: null,      // id del boton que se esta pulsando, para hundir la placa
     menuMascotaY: 0,    // donde flota la luciernaga del menu, calculado en drawMenu
     dbgFondo: { x: 0, off: 0, w: 0, scroll: 0 },   // solo para comprobar el desplazamiento
+    foto: false,        // true = dibuja solo el mundo, sin interfaz (para las miniaturas)
     adPending: false
   };
 
@@ -1436,6 +1437,10 @@
     drawGround();
 
     ctx.restore();
+
+    // Modo foto: solo el mundo, sin nada de interfaz encima. Sirve para sacar las
+    // miniaturas de la ficha, que no pueden llevar marcas, logos ni texto.
+    if (S.foto) return;
 
     drawHUD();
     if (S.mode === 'menu') drawMenu();
