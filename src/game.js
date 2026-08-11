@@ -43,28 +43,48 @@
     { id: 'brasa',  cost: 350, glow: '#ff6b3d', body: '#ffd5c2', trail: '#ff3d1f' }
   ];
 
+  // La niebla va como [r,g,b,a] y no como texto: asi se puede interpolar entre biomas.
+  // `img` y `obs` enganchan el bioma con su fondo y su tipo de obstaculo: al avanzar
+  // cambian juntos, que es lo que hace que el juego se sienta progresivo.
   var BIOMES = [
-    { sky: ['#0a1030', '#1b2a5e', '#2d4a7c'], hill1: '#0b1330', hill2: '#131f47', fog: 'rgba(90,130,200,0.10)', star: 0.9 },
-    { sky: ['#2a1442', '#5b2a5e', '#a9527a'], hill1: '#1d0f2e', hill2: '#301a44', fog: 'rgba(255,150,180,0.09)', star: 0.35 },
-    { sky: ['#08282c', '#0f4a4a', '#1d7a68'], hill1: '#062024', hill2: '#0c3436', fog: 'rgba(140,255,220,0.09)', star: 0.55 },
-    { sky: ['#161033', '#243a7a', '#2f7f9c'], hill1: '#0d0b24', hill2: '#171a3e', fog: 'rgba(120,255,240,0.12)', star: 1.0 }
+    { img: 'fondoNoche',  obs: 'obsHongo',   sky: ['#0a1030', '#1b2a5e', '#2d4a7c'], hill1: '#0b1330', hill2: '#131f47', fog: [90, 130, 200, 0.10], star: 0.9 },
+    { img: 'fondoAlba',   obs: 'obsTronco',  sky: ['#2a1442', '#5b2a5e', '#a9527a'], hill1: '#1d0f2e', hill2: '#301a44', fog: [255, 150, 180, 0.09], star: 0.35 },
+    { img: 'fondoBruma',  obs: 'obsCristal', sky: ['#08282c', '#0f4a4a', '#1d7a68'], hill1: '#062024', hill2: '#0c3436', fog: [140, 255, 220, 0.09], star: 0.55 },
+    { img: 'fondoAurora', obs: 'obsTotem',   sky: ['#161033', '#243a7a', '#2f7f9c'], hill1: '#0d0b24', hill2: '#171a3e', fog: [120, 255, 240, 0.12], star: 1.0 }
   ];
 
+  /*
+   * Cada columna se corta en tres: la tapa (que sobresale y hace de labio del hueco),
+   * una banda del medio que se repite para alargarla, y el resto se descarta.
+   * Son fracciones de la imagen ya recortada, medidas con herramientas/ (no a ojo):
+   *   tapa   - hasta donde llega el sombrero/capitel
+   *   banda  - el tramo uniforme que se puede repetir sin que se note
+   *   tallo  - que parte del ANCHO de la imagen es el tronco; el resto es voladizo
+   */
+  // La banda de cada uno se eligio deslizando una ventana por el tallo y quedandose con
+  // la que menos se nota al empalmar consigo misma, no a ojo.
+  var COLUMNAS = {
+    obsHongo:   { tapa: 0.292, banda0: 0.540, banda1: 0.660, tallo: 0.395 },
+    obsTronco:  { tapa: 0.262, banda0: 0.624, banda1: 0.743, tallo: 0.278 },
+    obsCristal: { tapa: 0.285, banda0: 0.509, banda1: 0.628, tallo: 0.480 },
+    obsTotem:   { tapa: 0.222, banda0: 0.458, banda1: 0.578, tallo: 0.491 }
+  };
+
+  // Cuanto tarda el cielo en pasar de un bioma al siguiente, en segundos.
+  var BIOME_FADE = 4.0;
+
+  /*
+   * Todo el texto va en INGLES, sin excepciones: el catalogo de Playables se juega en
+   * EE.UU., Reino Unido, Australia, India y la UE, y ahi el ingles es el minimo comun.
+   * Ademas la hoja de tipografia no trae enes ni vocales acentuadas, asi que un texto
+   * en espanol saldria con huecos.
+   */
   var STR = {
-    es: {
-      tap: 'Toca para volar', best: 'Mejor', skins: 'Luces', back: 'Volver',
-      retry: 'Otra vez', revive: 'Seguir', dbl: 'Doble polen', locked: 'Bloqueada',
-      use: 'Usar', inUse: 'En uso', newBest: 'Nuevo record', missions: 'Objetivos',
-      mGates: 'Cruza {n} puertas', mPollen: 'Junta {n} motas', mRuns: 'Juega {n} partidas',
-      done: 'Listo', ad: 'Anuncio'
-    },
-    en: {
-      tap: 'Tap to fly', best: 'Best', skins: 'Lights', back: 'Back',
-      retry: 'Again', revive: 'Continue', dbl: 'Double pollen', locked: 'Locked',
-      use: 'Use', inUse: 'In use', newBest: 'New best', missions: 'Goals',
-      mGates: 'Pass {n} gates', mPollen: 'Collect {n} motes', mRuns: 'Play {n} runs',
-      done: 'Done', ad: 'Ad'
-    }
+    tap: 'Tap to fly', best: 'Best', skins: 'Lights', back: 'Back',
+    retry: 'Again', revive: 'Continue', dbl: 'Double pollen', locked: 'Locked',
+    use: 'Use', inUse: 'In use', newBest: 'New best', missions: 'Goals',
+    mGates: 'Pass {n} gates', mPollen: 'Collect {n} motes', mRuns: 'Play {n} runs',
+    done: 'Done', ad: 'Ad'
   };
 
   /* ============================ estado global ============================ */
@@ -76,7 +96,6 @@
 
   var S = {
     mode: 'menu',        // menu | play | dead | skins
-    lang: 'en',
     t: 0,
     paused: false,
     booted: false,
@@ -87,6 +106,10 @@
     parts: [],
     scrollX: 0,
     speed: CFG.speed0,
+
+    biomeIdx: 0,      // bioma del que venimos
+    biomeNext: 0,     // bioma al que vamos
+    biomeT: 1,        // 0..1, avance del fundido
 
     score: 0,
     runPollen: 0,
@@ -104,10 +127,11 @@
 
     toast: null,
     buttons: [],
+    pressed: null,      // id del boton que se esta pulsando, para hundir la placa
     adPending: false
   };
 
-  function T(k) { return (STR[S.lang] || STR.en)[k] || STR.en[k] || k; }
+  function T(k) { return STR[k] || k; }
 
   /* ============================ utilidades ============================ */
 
@@ -134,8 +158,66 @@
     return SKINS[0];
   }
 
+  /* ---------- biomas con fundido ---------- */
+
+  function hex2rgb(h) {
+    return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  }
+
+  function mixHex(a, b, t) {
+    var A = hex2rgb(a), B = hex2rgb(b);
+    return 'rgb(' + Math.round(lerp(A[0], B[0], t)) + ',' +
+                    Math.round(lerp(A[1], B[1], t)) + ',' +
+                    Math.round(lerp(A[2], B[2], t)) + ')';
+  }
+
+  function mixFog(a, b, t) {
+    return 'rgba(' + Math.round(lerp(a[0], b[0], t)) + ',' +
+                     Math.round(lerp(a[1], b[1], t)) + ',' +
+                     Math.round(lerp(a[2], b[2], t)) + ',' +
+                     (lerp(a[3], b[3], t)).toFixed(3) + ')';
+  }
+
+  // Devuelve el bioma ya mezclado. Mientras S.biomeT va de 0 a 1 el cielo, los cerros
+  // y la niebla cruzan del bioma viejo al nuevo; nada cambia de golpe.
+  var _biomeCache = { t: -1, i: -1, j: -1, v: null };
   function biome() {
-    return BIOMES[Math.floor(S.passed / CFG.biomeEvery) % BIOMES.length];
+    var i = S.biomeIdx, j = S.biomeNext, t = S.biomeT;
+    if (_biomeCache.t === t && _biomeCache.i === i && _biomeCache.j === j) return _biomeCache.v;
+
+    var A = BIOMES[i], B = BIOMES[j];
+    var v;
+    if (t >= 1 || i === j) {
+      v = { sky: B.sky.map(function (c) { return mixHex(c, c, 0); }),
+            hill1: mixHex(B.hill1, B.hill1, 0), hill2: mixHex(B.hill2, B.hill2, 0),
+            fog: mixFog(B.fog, B.fog, 0), star: B.star };
+    } else {
+      // curva suave: entra y sale sin tirones
+      var e = t * t * (3 - 2 * t);
+      v = {
+        sky: [mixHex(A.sky[0], B.sky[0], e), mixHex(A.sky[1], B.sky[1], e), mixHex(A.sky[2], B.sky[2], e)],
+        hill1: mixHex(A.hill1, B.hill1, e),
+        hill2: mixHex(A.hill2, B.hill2, e),
+        fog: mixFog(A.fog, B.fog, e),
+        star: lerp(A.star, B.star, e)
+      };
+    }
+    _biomeCache = { t: t, i: i, j: j, v: v };
+    return v;
+  }
+
+  function updateBiome(dt) {
+    var quiere = Math.floor(S.passed / CFG.biomeEvery) % BIOMES.length;
+    if (quiere !== S.biomeNext) {
+      // arranca un fundido nuevo desde lo que se ve ahora mismo
+      S.biomeIdx = S.biomeT >= 1 ? S.biomeNext : S.biomeIdx;
+      S.biomeNext = quiere;
+      S.biomeT = 0;
+    }
+    if (S.biomeT < 1) {
+      S.biomeT = Math.min(1, S.biomeT + dt / BIOME_FADE);
+      if (S.biomeT >= 1) S.biomeIdx = S.biomeNext;
+    }
   }
 
   function playH() { return V.h - CFG.groundH; }
@@ -183,7 +265,14 @@
     var g = gapH();
     var margin = playH() * 0.10;
     var cy = rnd(margin + g / 2, playH() - margin - g / 2);
-    return { x: x, cy: cy, gap: g, passed: false, wob: rnd(0, 6.28), cap: Math.random() < 0.5 };
+    // El tipo de obstaculo se fija al nacer, con el bioma al que vamos. Asi el mundo
+    // cambia de material a medida que entran puertas nuevas, en vez de mutar de golpe
+    // las que ya estan en pantalla.
+    return {
+      x: x, cy: cy, gap: g, passed: false, wob: rnd(0, 6.28),
+      cap: Math.random() < 0.5,
+      obs: BIOMES[S.biomeNext].obs
+    };
   }
 
   function resetRun(keepGates) {
@@ -316,6 +405,8 @@
 
     if (S.mode === 'dead') { S.deadT += dt; return; }
     if (S.mode !== 'play' || S.paused) return;
+
+    updateBiome(dt);
 
     S.speed = Math.min(CFG.speedMax, CFG.speed0 + S.passed * CFG.speedStep);
     var dx = S.speed * dt;
@@ -481,6 +572,85 @@
 
   /* ============================ dibujo ============================ */
 
+  /* ---------- sprites ---------- */
+
+  var IMG = ASSETS.IMG;
+
+  /*
+   * Dibuja una columna de obstaculo a partir de UNA sola imagen: pega la tapa en el
+   * labio del hueco y repite la banda del medio hasta cubrir el largo que haga falta.
+   *
+   * `talloPx` es el ancho del TRONCO, que es el que choca. El sombrero sobresale por
+   * fuera de esa medida, igual que en el dibujo: lo que se ve vuela un poco mas que lo
+   * que mata, que es como se sienten bien estos juegos.
+   * `haciaArriba` la hace crecer hacia el techo en vez de hacia el suelo.
+   */
+  function drawColumna(img, meta, xCentroPx, labioPx, largoPx, talloPx, haciaArriba) {
+    if (largoPx <= 0) return;
+    var iw = img.width, ih = img.height;
+
+    var anchoPx = talloPx / meta.tallo;      // ancho de la imagen entera
+    var esc = anchoPx / iw;
+    var x = xCentroPx - anchoPx / 2;
+
+    var hTapa = ih * meta.tapa;
+    var y0 = ih * meta.banda0;
+    var hBanda = Math.max(1, ih * meta.banda1 - y0);
+
+    ctx.save();
+    ctx.translate(x, labioPx);
+    if (haciaArriba) ctx.scale(1, -1);
+
+    var tapaPx = hTapa * esc;
+    var paso = hBanda * esc;
+
+    // El cuerpo va primero y arranca DEBAJO de donde ira la tapa; la tapa se dibuja
+    // encima al final y se come la costura.
+    var y = Math.max(0, tapaPx - 1);
+    var guarda = 0;
+    while (y < largoPx && guarda++ < 200) {
+      var resto = Math.min(paso, largoPx - y);
+      ctx.drawImage(img, 0, y0, iw, hBanda * (resto / paso), 0, y, anchoPx, resto);
+      y += resto;
+    }
+    ctx.drawImage(img, 0, 0, iw, hTapa, 0, 0, anchoPx, tapaPx);
+
+    ctx.restore();
+  }
+
+  // Fondo de bioma: dos imagenes superpuestas con la de destino subiendo de opacidad.
+  // Es lo que hace que el cambio de bioma sea un amanecer y no un corte de luz.
+  function drawFondoImg(nombre, alpha, par) {
+    var img = IMG[nombre];
+    if (!img || alpha <= 0.002) return false;
+
+    // "cover": llena la pantalla sin deformar la imagen.
+    var escala = Math.max(V.pxW / img.width, V.pxH / img.height);
+    var w = img.width * escala, h = img.height * escala;
+    var off = (-(S.scrollX * par) % w + w) % w;
+    var y = (V.pxH - h) * 0.5;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(img, -off, y, w, h);
+    if (off > 0) ctx.drawImage(img, -off + w, y, w, h);
+    ctx.restore();
+    return true;
+  }
+
+  // Un fotograma de una tira horizontal de `n` celdas.
+  function drawFrame(img, n, i, xPx, yPx, anchoPx, rot, alpha) {
+    var cw = img.width / n;
+    var esc = anchoPx / cw;
+    var ch = img.height * esc;
+    ctx.save();
+    ctx.translate(xPx, yPx);
+    if (rot) ctx.rotate(rot);
+    if (alpha !== undefined) ctx.globalAlpha = alpha;
+    ctx.drawImage(img, (i % n) * cw, 0, cw, img.height, -anchoPx / 2, -ch / 2, anchoPx, ch);
+    ctx.restore();
+  }
+
   var stars = [];
   function initStars() {
     stars.length = 0;
@@ -491,6 +661,30 @@
 
   function drawBackground() {
     var B = biome();
+
+    // --- camino con imagenes: el bioma viejo abajo y el nuevo subiendo de opacidad ---
+    var imgA = IMG[BIOMES[S.biomeIdx].img];
+    var imgB = IMG[BIOMES[S.biomeNext].img];
+    if (imgA || imgB) {
+      var e = S.biomeT >= 1 ? 1 : S.biomeT * S.biomeT * (3 - 2 * S.biomeT);
+      ctx.fillStyle = '#0a1030';
+      ctx.fillRect(0, 0, V.pxW, V.pxH);
+      drawFondoImg(BIOMES[S.biomeIdx].img, 1, 0.10);
+      if (imgB && imgA !== imgB) drawFondoImg(BIOMES[S.biomeNext].img, e, 0.10);
+      else if (!imgA) drawFondoImg(BIOMES[S.biomeNext].img, 1, 0.10);
+
+      // Velo oscuro: hay biomas de cielo muy claro (la bruma) sobre los que el texto
+      // blanco y los obstaculos se perderian. Esto garantiza contraste siempre.
+      var velo = ctx.createLinearGradient(0, 0, 0, V.pxH);
+      velo.addColorStop(0, 'rgba(6,10,24,0.34)');
+      velo.addColorStop(0.45, 'rgba(6,10,24,0.16)');
+      velo.addColorStop(1, 'rgba(6,10,24,0.42)');
+      ctx.fillStyle = velo;
+      ctx.fillRect(0, 0, V.pxW, V.pxH);
+      return;
+    }
+
+    // --- respaldo dibujado a mano, si no hay imagenes ---
     var gr = ctx.createLinearGradient(0, 0, 0, V.pxH);
     gr.addColorStop(0, B.sky[0]);
     gr.addColorStop(0.55, B.sky[1]);
@@ -553,49 +747,81 @@
     var top = g.cy - g.gap / 2;
     var bot = g.cy + g.gap / 2;
     var x = X(g.x), w = X(CFG.gateW);
+    var cx = x + w / 2;
     var sway = Math.sin(S.t * 1.1 + g.wob) * X(0.35);
 
-    var grad = ctx.createLinearGradient(x, 0, x + w, 0);
-    grad.addColorStop(0, '#123227');
-    grad.addColorStop(0.45, '#1e5741');
-    grad.addColorStop(1, '#0e2a20');
+    var img = IMG[g.obs], meta = COLUMNAS[g.obs];
 
-    // tallo superior
-    ctx.fillStyle = grad;
-    rrect(x + sway * 0.4, -X(6), w, X(top) + X(6), X(2.2)); ctx.fill();
-    // tallo inferior
-    rrect(x - sway * 0.4, X(bot), w, X(playH() - bot) + X(6), X(2.2)); ctx.fill();
+    if (img && meta) {
+      drawColumna(img, meta, cx + sway * 0.4, X(top), X(top) + X(6), w, true);
+      drawColumna(img, meta, cx - sway * 0.4, X(bot), X(playH() - bot) + X(6), w, false);
+    } else {
+      // Sin sprite: tallos dibujados a mano. El juego nunca se queda sin obstaculos.
+      var grad = ctx.createLinearGradient(x, 0, x + w, 0);
+      grad.addColorStop(0, '#123227');
+      grad.addColorStop(0.45, '#1e5741');
+      grad.addColorStop(1, '#0e2a20');
+      ctx.fillStyle = grad;
+      rrect(x + sway * 0.4, -X(6), w, X(top) + X(6), X(2.2)); ctx.fill();
+      rrect(x - sway * 0.4, X(bot), w, X(playH() - bot) + X(6), X(2.2)); ctx.fill();
 
-    // borde luminoso en los labios del hueco
-    var glow = ctx.createLinearGradient(0, X(top) - X(2), 0, X(top));
-    glow.addColorStop(0, 'rgba(120,255,200,0)');
-    glow.addColorStop(1, 'rgba(120,255,200,0.55)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(x + sway * 0.4, X(top) - X(2), w, X(2));
-
-    var glow2 = ctx.createLinearGradient(0, X(bot), 0, X(bot) + X(2));
-    glow2.addColorStop(0, 'rgba(120,255,200,0.55)');
-    glow2.addColorStop(1, 'rgba(120,255,200,0)');
-    ctx.fillStyle = glow2;
-    ctx.fillRect(x - sway * 0.4, X(bot), w, X(2));
-
-    // sombrerito de hongo en un lado, para que no sean dos tubos iguales
-    if (g.cap) {
-      ctx.fillStyle = '#2b6b4e';
-      rrect(x - X(1.1) + sway * 0.4, X(top) - X(1.6), w + X(2.2), X(1.9), X(0.9)); ctx.fill();
-      ctx.fillStyle = '#2b6b4e';
-      rrect(x - X(1.1) - sway * 0.4, X(bot) - X(0.3), w + X(2.2), X(1.9), X(0.9)); ctx.fill();
+      if (g.cap) {
+        ctx.fillStyle = '#2b6b4e';
+        rrect(x - X(1.1) + sway * 0.4, X(top) - X(1.6), w + X(2.2), X(1.9), X(0.9)); ctx.fill();
+        rrect(x - X(1.1) - sway * 0.4, X(bot) - X(0.3), w + X(2.2), X(1.9), X(0.9)); ctx.fill();
+      }
     }
+
+    // Labios del hueco encendidos, latiendo: marcan por donde hay que pasar.
+    //
+    // Va en modo 'lighter' (suma luz) y con degradado radial. Con un rectangulo y
+    // alfa normal se veia el recuadro pintado encima del sombrero, como un parche.
+    // Sumando luz, lo transparente no aporta nada y no queda borde.
+    var pulso = 0.34 + 0.22 * Math.sin(S.t * 2.6 + g.wob);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    labioLuz(cx + sway * 0.4, X(top), w, pulso);
+    labioLuz(cx - sway * 0.4, X(bot), w, pulso);
+    ctx.restore();
+  }
+
+  function labioLuz(cxPx, yPx, wPx, fuerza) {
+    var r = wPx * 0.95;
+    var g = ctx.createRadialGradient(cxPx, yPx, 0, cxPx, yPx, r);
+    g.addColorStop(0, 'rgba(120,255,205,' + (fuerza * 0.75).toFixed(3) + ')');
+    g.addColorStop(0.45, 'rgba(90,220,180,' + (fuerza * 0.28).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(60,180,150,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(cxPx, yPx, r, r * 0.55, 0, 0, 6.2832);
+    ctx.fill();
   }
 
   function drawMote(m) {
-    var pulse = 0.75 + 0.25 * Math.sin(S.t * 3.4 + m.ph);
-    var r = X(m.v > 1 ? 2.0 : 1.25) * pulse;
     var x = X(m.x), y = X(m.y + Math.sin(S.t * 2 + m.ph) * 0.5);
-    var c = m.v > 1 ? '#ffd45e' : '#fff0b8';
+    var grande = m.v > 1;
+
+    if (IMG.mota) {
+      // Cada mota lleva su propia fase para que no destellen todas al unisono.
+      var f = Math.floor((S.t * 9 + m.ph * 2)) % 4;
+      var alto = X(grande ? 7.5 : 5.0);
+      // El halo va debajo del sprite: le da presencia sobre un fondo oscuro.
+      var g0 = ctx.createRadialGradient(x, y, 0, x, y, alto * 0.9);
+      g0.addColorStop(0, grande ? 'rgba(255,212,94,0.45)' : 'rgba(255,240,184,0.30)');
+      g0.addColorStop(1, 'rgba(255,240,184,0)');
+      ctx.fillStyle = g0;
+      ctx.beginPath(); ctx.arc(x, y, alto * 0.9, 0, 6.2832); ctx.fill();
+
+      drawFrame(IMG.mota, 4, f, x, y, alto * (IMG.mota.width / 4) / IMG.mota.height);
+      return;
+    }
+
+    var pulse = 0.75 + 0.25 * Math.sin(S.t * 3.4 + m.ph);
+    var r = X(grande ? 2.0 : 1.25) * pulse;
+    var c = grande ? '#ffd45e' : '#fff0b8';
 
     var g = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
-    g.addColorStop(0, m.v > 1 ? 'rgba(255,212,94,0.55)' : 'rgba(255,240,184,0.4)');
+    g.addColorStop(0, grande ? 'rgba(255,212,94,0.55)' : 'rgba(255,240,184,0.4)');
     g.addColorStop(1, 'rgba(255,240,184,0)');
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(x, y, r * 4, 0, 6.2832); ctx.fill();
@@ -609,13 +835,40 @@
     var x = X(birdX()), y = X(S.bird.y);
     var r = X(CFG.birdR);
 
-    // halo
+    // En el menu la luciernaga hace de mascota: se para en el centro, entre el record
+    // y la lista de objetivos, y flota. En su sitio de juego se montaba sobre el texto.
+    if (S.mode === 'menu') {
+      x = V.pxW / 2;
+      y = X(V.h * 0.455) + X(Math.sin(S.t * 1.6) * 0.9);
+      r = X(CFG.birdR * 1.25);
+    }
+
+    // halo: es lo que lleva el color de la "luz" elegida en la tienda
     var g = ctx.createRadialGradient(x, y, 0, x, y, r * 5.5);
     g.addColorStop(0, sk.glow + 'cc');
     g.addColorStop(0.35, sk.glow + '55');
     g.addColorStop(1, sk.glow + '00');
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(x, y, r * 5.5, 0, 6.2832); ctx.fill();
+
+    if (IMG.luciernaga) {
+      // Aletea sola a ritmo constante y se acelera al saltar: el aleteo rapido es lo
+      // que hace legible que el toque hizo algo.
+      var vel = S.bird.flapT > 0 ? 26 : 11;
+      var f = Math.floor(S.t * vel) % 4;
+      drawFrame(IMG.luciernaga, 4, f, x, y, r * 4.6, S.bird.rot * 0.5);
+
+      // Un punto de luz del color de la skin sobre el farolito de la cola.
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      var gb = ctx.createRadialGradient(x - r * 1.1, y + r * 0.35, 0, x - r * 1.1, y + r * 0.35, r * 1.5);
+      gb.addColorStop(0, sk.glow + 'aa');
+      gb.addColorStop(1, sk.glow + '00');
+      ctx.fillStyle = gb;
+      ctx.beginPath(); ctx.arc(x - r * 1.1, y + r * 0.35, r * 1.5, 0, 6.2832); ctx.fill();
+      ctx.restore();
+      return;
+    }
 
     ctx.save();
     ctx.translate(x, y);
@@ -694,12 +947,26 @@
 
   function fontPx(u) { return Math.max(9, X(u)); }
 
+  // Escribe con la tipografia de mapa de bits si ya cargo; si no, con la del sistema.
+  // El tamano se pasa en unidades de mundo, igual que todo lo demas.
   function text(str, x, y, size, color, align, weight) {
+    if (ASSETS.Fuente.lista()) {
+      // La hoja mide el alto de MAYUSCULA; una fuente del sistema mide el em entero,
+      // que es como un 30% mas alto. Se compensa para que ambas se vean del mismo porte.
+      if (ASSETS.Fuente.dibujar(ctx, String(str), x, y, fontPx(size) * 0.72,
+                                color, align || 'center', 'middle')) return;
+    }
     ctx.font = (weight || '700') + ' ' + fontPx(size) + 'px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
     ctx.textAlign = align || 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = color;
     ctx.fillText(str, x, y);
+  }
+
+  function textWidth(str, size) {
+    if (ASSETS.Fuente.lista()) return ASSETS.Fuente.ancho(String(str), fontPx(size) * 0.72);
+    ctx.font = '700 ' + fontPx(size) + 'px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+    return ctx.measureText(String(str)).width;
   }
 
   function shadowText(str, x, y, size, color, align) {
@@ -711,28 +978,84 @@
     ctx.restore();
   }
 
+  /*
+   * Placa de boton en TRES CORTES: las dos puntas se dibujan a su tamano natural y solo
+   * se estira el trozo del medio. Escalar la imagen entera deformaria las enredaderas
+   * de los extremos, que es lo que delata un boton estirado.
+   */
+  function drawPlaca(img, x, y, w, h) {
+    var iw = img.width, ih = img.height;
+    var punta = 0.26;                       // fraccion decorada de cada extremo
+    var srcP = iw * punta;
+    var dstP = Math.min(h * (srcP / ih), w * 0.45);
+
+    ctx.drawImage(img, 0, 0, srcP, ih, x, y, dstP, h);
+    ctx.drawImage(img, iw - srcP, 0, srcP, ih, x + w - dstP, y, dstP, h);
+    var medio = iw - srcP * 2;
+    if (medio > 0 && w - dstP * 2 > 0) {
+      ctx.drawImage(img, srcP, 0, medio, ih, x + dstP, y, w - dstP * 2, h);
+    }
+  }
+
+  // La tira de iconos son 4 celdas: 0 polen, 1 hoja, 2 anuncio, 3 estrella.
+  var ICONO = { POLEN: 0, HOJA: 1, ANUNCIO: 2, ESTRELLA: 3 };
+
+  function drawIcono(i, cxPx, cyPx, altoPx, alpha) {
+    var img = IMG.iconos;
+    if (!img) return false;
+    var cw = img.width / 4;
+    var esc = altoPx / img.height;
+    var w = cw * esc;
+    ctx.save();
+    if (alpha !== undefined) ctx.globalAlpha = alpha;
+    ctx.drawImage(img, i * cw, 0, cw, img.height,
+                  cxPx - w / 2, cyPx - altoPx / 2, w, altoPx);
+    ctx.restore();
+    return true;
+  }
+
   function button(id, wx, wy, ww, wh, label, opts) {
     opts = opts || {};
     var x = X(wx), y = X(wy), w = X(ww), h = X(wh);
     S.buttons.push({ id: id, x: x, y: y, w: w, h: h, on: opts.on });
 
-    ctx.save();
-    if (opts.glow) {
-      ctx.shadowColor = opts.glow;
-      ctx.shadowBlur = X(1.6);
+    var pulsado = (S.pressed === id);
+    var placa = pulsado ? (IMG.botonPulsado || IMG.boton) : IMG.boton;
+
+    if (placa) {
+      ctx.save();
+      if (opts.glow) { ctx.shadowColor = opts.glow; ctx.shadowBlur = X(1.4); }
+      drawPlaca(placa, x, y, w, h);
+      ctx.restore();
+    } else {
+      ctx.save();
+      if (opts.glow) { ctx.shadowColor = opts.glow; ctx.shadowBlur = X(1.6); }
+      ctx.fillStyle = opts.bg || 'rgba(255,255,255,0.13)';
+      rrect(x, y, w, h, X(1.6)); ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = opts.border || 'rgba(255,255,255,0.28)';
+      ctx.lineWidth = Math.max(1, X(0.16));
+      rrect(x, y, w, h, X(1.6)); ctx.stroke();
     }
-    ctx.fillStyle = opts.bg || 'rgba(255,255,255,0.13)';
-    rrect(x, y, w, h, X(1.6)); ctx.fill();
-    ctx.restore();
 
-    ctx.strokeStyle = opts.border || 'rgba(255,255,255,0.28)';
-    ctx.lineWidth = Math.max(1, X(0.16));
-    rrect(x, y, w, h, X(1.6)); ctx.stroke();
+    var size = opts.size || 2.6;
+    var cyTxt = y + h / 2 + (pulsado ? X(0.25) : 0);   // el texto se hunde con la placa
+    var fg = opts.fg || (placa ? '#4a2c12' : '#ffffff');
 
-    text(label, x + w / 2, y + h / 2, opts.size || 2.6, opts.fg || '#ffffff');
+    if (opts.icono !== undefined && IMG.iconos) {
+      var ih = h * 0.52;
+      var tw = textWidth(label, size);
+      var sep = X(1.0);
+      var totalW = tw + sep + ih;
+      text(label, x + w / 2 - totalW / 2, cyTxt, size, fg, 'left');
+      drawIcono(opts.icono, x + w / 2 + totalW / 2 - ih / 2, cyTxt, ih);
+    } else {
+      text(label, x + w / 2, cyTxt, size, fg);
+    }
   }
 
   function pollenIcon(x, y, r) {
+    if (drawIcono(ICONO.POLEN, x, y, r * 3.4)) return;
     var g = ctx.createRadialGradient(x, y, 0, x, y, r * 3);
     g.addColorStop(0, 'rgba(255,212,94,0.5)');
     g.addColorStop(1, 'rgba(255,212,94,0)');
@@ -755,9 +1078,31 @@
 
   function drawMenu() {
     var cx = V.pxW / 2;
-    shadowText('LUMEN', cx, X(V.h * 0.26), 8.5, '#fff6d6');
-    shadowText(T('tap'), cx, X(V.h * 0.36), 3, 'rgba(255,255,255,0.75)');
-    shadowText(T('best') + ' ' + S.save.best, cx, X(V.h * 0.43), 3, 'rgba(255,255,255,0.55)');
+
+    var logo = IMG.logo;
+    var yTitulo = X(V.h * 0.24);
+    var abajoTitulo;                     // donde termina de verdad el titulo
+
+    if (logo) {
+      var lw = Math.min(V.pxW * 0.72, X(Math.min(V.w * 0.80, 58)));
+      var lh = lw * logo.height / logo.width;
+      // Late suave: es lo primero que se ve y da sensacion de que el juego esta vivo.
+      var lat = 1 + 0.022 * Math.sin(S.t * 1.7);
+      ctx.save();
+      ctx.translate(cx, yTitulo);
+      ctx.scale(lat, lat);
+      ctx.drawImage(logo, -lw / 2, -lh / 2, lw, lh);
+      ctx.restore();
+      abajoTitulo = yTitulo + lh / 2;
+    } else {
+      shadowText('LUMEN', cx, yTitulo, 8.5, '#fff6d6');
+      abajoTitulo = yTitulo + X(4.5);
+    }
+
+    // El texto cuelga del BORDE del titulo, no de una fraccion fija de la pantalla:
+    // el logo cambia de alto segun el ancho y si no, se le monta encima.
+    shadowText(T('tap'), cx, abajoTitulo + X(4.5), 3, 'rgba(255,255,255,0.78)');
+    shadowText(T('best') + ' ' + S.save.best, cx, abajoTitulo + X(10), 3, 'rgba(255,255,255,0.55)');
 
     // objetivos
     var ms = S.save.missions || [];
@@ -773,8 +1118,15 @@
       var prog = clamp(m.n / m.goal, 0, 1);
       ctx.fillStyle = m.ok ? 'rgba(140,255,200,0.35)' : 'rgba(255,224,138,0.28)';
       rrect(X(x), X(y), X(w * prog), X(4.2), X(1.2)); ctx.fill();
-      text(missionLabel(m), X(x + 2), X(y + 2.1), 2.1, 'rgba(255,255,255,0.9)', 'left');
-      text('+' + m.rw, X(x + w - 2), X(y + 2.1), 2.1, '#ffe08a', 'right');
+      text(missionLabel(m), X(x + 2), X(y + 2.1), 2.1, 'rgba(255,255,255,0.92)', 'left');
+      if (m.ok) {
+        // Cumplido: estrella en vez de la recompensa. Se lee de un vistazo.
+        if (!drawIcono(ICONO.ESTRELLA, X(x + w - 3), X(y + 2.1), X(3.4))) {
+          text('+' + m.rw, X(x + w - 2), X(y + 2.1), 2.1, '#8effc8', 'right');
+        }
+      } else {
+        text('+' + m.rw, X(x + w - 2), X(y + 2.1), 2.1, '#ffe08a', 'right');
+      }
     }
 
     var bw = Math.min(V.w * 0.5, 30);
@@ -798,14 +1150,16 @@
     var y = V.h * 0.52;
 
     if (!S.revivedThisRun && S.score >= CFG.reviveMinScore) {
-      button('revive', bx, y, bw, 7, T('revive') + '   ▶ ' + T('ad'), {
-        bg: 'rgba(120,255,200,0.18)', border: 'rgba(120,255,200,0.5)', glow: 'rgba(120,255,200,0.4)'
+      button('revive', bx, y, bw, 7.4, T('revive'), {
+        icono: ICONO.ANUNCIO,
+        bg: 'rgba(120,255,200,0.18)', border: 'rgba(120,255,200,0.5)', glow: 'rgba(120,255,200,0.45)'
       });
       y += 8.6;
     }
     if (!S.doubledThisRun && S.runPollen > 0) {
-      button('double', bx, y, bw, 7, T('dbl') + '   ▶ ' + T('ad'), {
-        bg: 'rgba(255,212,94,0.16)', border: 'rgba(255,212,94,0.5)', glow: 'rgba(255,212,94,0.35)'
+      button('double', bx, y, bw, 7.4, T('dbl'), {
+        icono: ICONO.ANUNCIO, size: 2.3,
+        bg: 'rgba(255,212,94,0.16)', border: 'rgba(255,212,94,0.5)', glow: 'rgba(255,212,94,0.4)'
       });
       y += 8.6;
     }
@@ -828,6 +1182,13 @@
     var chh = Math.min(cw * 0.92, (V.h * 0.55) / rows);
     var startX = V.w / 2 - (cw * cols) / 2;
     var startY = V.h * 0.26;
+
+    // Marco de madera detras de la rejilla: sin el, la tienda es una lista flotando.
+    if (IMG.panel) {
+      var mx = startX - cw * 0.22, my = startY - chh * 0.26;
+      var mw = cw * cols + cw * 0.44, mh = chh * rows + chh * 0.52;
+      ctx.drawImage(IMG.panel, X(mx), X(my), X(mw), X(mh));
+    }
 
     for (var i = 0; i < SKINS.length; i++) {
       var sk = SKINS[i];
@@ -878,8 +1239,7 @@
 
     // La pildora se mide sobre el texto: nunca lo corta, en ningun idioma ni ancho.
     var size = 2.7;
-    ctx.font = '700 ' + fontPx(size) + 'px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-    var tw = ctx.measureText(S.toast.text).width;
+    var tw = textWidth(S.toast.text, size);
     var w = Math.min(tw + X(5), V.pxW - X(4));
     var h = X(6);
 
@@ -944,6 +1304,10 @@
 
     var b = hit(px, py);
     if (b) {
+      // Hunde la placa un instante: sin esto el boton se siente muerto.
+      S.pressed = b.id;
+      setTimeout(function () { if (S.pressed === b.id) S.pressed = null; }, 130);
+
       if (b.id === 'skins') { prevMode = S.mode; S.mode = 'skins'; return; }
       if (b.id === 'back')  { S.mode = prevMode === 'skins' ? 'menu' : prevMode; return; }
       if (b.id === 'retry') { restart(); return; }
@@ -1015,14 +1379,41 @@
     requestAnimationFrame(frame);
   }
 
+  // Todo lo que el juego pinta si esta disponible. Si falta cualquiera de estos, se
+  // dibuja el respaldo procedural: nunca es un error fatal.
+  var MANIFIESTO = {
+    logo:        'assets/logo.webp',
+    fuente:      'assets/fuente.png',
+    obsHongo:    'assets/obs-hongo.webp',
+    obsTronco:   'assets/obs-tronco.webp',
+    obsCristal:  'assets/obs-cristal.webp',
+    obsTotem:    'assets/obs-totem.webp',
+    fondoNoche:  'assets/fondo-noche.webp',
+    fondoAlba:   'assets/fondo-alba.webp',
+    fondoBruma:  'assets/fondo-bruma.webp',
+    fondoAurora: 'assets/fondo-aurora.webp',
+    luciernaga:  'assets/luciernaga.webp',
+    mota:        'assets/mota.webp',
+    boton:       'assets/boton.webp',
+    botonPulsado:'assets/boton-pulsado.webp',
+    panel:       'assets/panel.webp',
+    iconos:      'assets/iconos.webp'
+  };
+
   function boot() {
     resize();
     initStars();
 
-    S.lang = (function () {
-      var l = (navigator.language || 'en').toLowerCase();
-      return l.indexOf('es') === 0 ? 'es' : 'en';
-    })();
+    // Se cargan en paralelo y el juego NO espera: arranca dibujado a mano y los sprites
+    // entran solos cuando llegan. Asi el "jugable en 5 segundos" no depende de la red.
+    var fuenteLista = false;
+    var engancharFuente = function () {
+      if (!fuenteLista && IMG.fuente && window.FUENTE_DATOS) {
+        ASSETS.Fuente.init(IMG.fuente, window.FUENTE_DATOS);
+        fuenteLista = true;
+      }
+    };
+    ASSETS.cargar(MANIFIESTO, engancharFuente, engancharFuente);
 
     YT.boot(function () {
       SFX.setEnabled(YT.isAudioEnabled());

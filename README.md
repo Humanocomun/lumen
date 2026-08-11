@@ -2,9 +2,9 @@
 
 Una luciérnaga cruzando el bosque de noche. Un toque para volar.
 
-Juego HTML5 hecho para **YouTube Playables**: sin dependencias, sin build, sin imágenes.
-Todo el arte y el sonido son procedurales (Canvas 2D + WebAudio), así que el bundle pesa
-unas decenas de KB y la partida arranca al instante.
+Juego HTML5 hecho para **YouTube Playables**: sin dependencias y sin build. Canvas 2D +
+WebAudio, con los sonidos sintetizados en el momento (cero archivos de audio) y el arte
+en un puñado de WebP. El bundle completo ronda los 470 KB.
 
 **Jugar:** https://humanocomun.github.io/lumen/
 
@@ -21,7 +21,9 @@ unas decenas de KB y la partida arranca al instante.
 | `index.html` | Contenedor. Carga el SDK de Playables **antes** que el juego. |
 | `src/yt.js` | Envoltura del SDK: ciclo de vida, guardado, idioma, audio y anuncios. Funciona igual fuera de YouTube. |
 | `src/audio.js` | Efectos sintetizados con WebAudio. Cero archivos de audio. |
+| `src/assets.js` | Carga de imágenes y tipografía de mapa de bits (con tintado cacheado). |
 | `src/game.js` | El juego entero: física, mundo, meta-progresión y dibujo. |
+| `assets/` | Fondos, obstáculos, interfaz, animaciones y la hoja de tipografía. |
 | `qa/autopilot.js` | Piloto automático para probar dificultad y que el bucle no se rompa. |
 
 ## Requisitos de plataforma que ya cumple
@@ -56,5 +58,9 @@ await lumenQA({ runs: 5 });
 `src/yt.js` está basado en el helper `YouTubePlayables.js` de la plantilla oficial de
 Phaser para YouTube Playables (MIT), reescrito como script clásico y ampliado con anuncios.
 Ver `NOTICE`.
+
+El arte lo generó **TARS**, el agente vecino, a partir de encargos escritos; el recorte a
+transparencia, el troceado, la estabilización de los fotogramas y las métricas de la
+tipografía se hicieron con las herramientas de `../herramientas/`.
 
 Todo lo demás es original.
