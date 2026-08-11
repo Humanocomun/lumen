@@ -1178,15 +1178,17 @@
 
     var cols = V.w > 80 ? 3 : 2;
     var rows = Math.ceil(SKINS.length / cols);
-    var cw = Math.min(V.w * 0.86, 78) / cols;
-    var chh = Math.min(cw * 0.92, (V.h * 0.55) / rows);
+    var cw = Math.min(V.w * 0.72, 68) / cols;
+    var chh = Math.min(cw * 0.92, (V.h * 0.50) / rows);
     var startX = V.w / 2 - (cw * cols) / 2;
-    var startY = V.h * 0.26;
+    var startY = V.h * 0.28;
 
     // Marco de madera detras de la rejilla: sin el, la tienda es una lista flotando.
+    // El aire de los lados es generoso a proposito: el borde tallado del marco es
+    // grueso y con menos margen las tarjetas se le montan encima.
     if (IMG.panel) {
-      var mx = startX - cw * 0.22, my = startY - chh * 0.26;
-      var mw = cw * cols + cw * 0.44, mh = chh * rows + chh * 0.52;
+      var mx = startX - cw * 0.34, my = startY - chh * 0.34;
+      var mw = cw * cols + cw * 0.68, mh = chh * rows + chh * 0.68;
       ctx.drawImage(IMG.panel, X(mx), X(my), X(mw), X(mh));
     }
 
