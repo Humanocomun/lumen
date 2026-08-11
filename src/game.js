@@ -8,7 +8,8 @@
  *  - Sin links externos, sin boton de compartir, sin boton de salir, sin boton de mute
  *    (el audio lo manda YouTube via system.isAudioEnabled).
  *  - Esc cierra los paneles y no se bloquea.
- *  - Todo el arte es procedural: cero imagenes, bundle minusculo, carga instantanea.
+ *  - El arte va en un punado de WebP con respaldo procedural: si falta un asset,
+ *    el juego lo dibuja a mano y sigue. Nunca es un error fatal.
  */
 (function () {
   'use strict';
@@ -128,6 +129,8 @@
     toast: null,
     buttons: [],
     pressed: null,      // id del boton que se esta pulsando, para hundir la placa
+    menuMascotaY: 0,    // donde flota la luciernaga del menu, calculado en drawMenu
+    dbgFondo: { x: 0, off: 0, w: 0, scroll: 0 },   // solo para comprobar el desplazamiento
     adPending: false
   };
 
@@ -618,8 +621,32 @@
     ctx.restore();
   }
 
-  // Fondo de bioma: dos imagenes superpuestas con la de destino subiendo de opacidad.
-  // Es lo que hace que el cambio de bioma sea un amanecer y no un corte de luz.
+  // Una copia del fondo, opcionalmente reflejada.
+  function baldosaFondo(img, x, y, w, h, espejo) {
+    if (!espejo) { ctx.drawImage(img, x, y, w, h); return; }
+    ctx.save();
+    ctx.translate(x + w, y);
+    ctx.scale(-1, 1);
+    ctx.drawImage(img, 0, 0, w, h);
+    ctx.restore();
+  }
+
+  /*
+   * Fondo de bioma en bucle.
+   *
+   * Dos cosas que estaban mal y aca se arreglan:
+   *
+   * 1. LA DIRECCION. El fondo se iba hacia la derecha, o sea hacia adelante, y parecia
+   *    que la luciernaga retrocedia. El mundo se mueve hacia la IZQUIERDA (los obstaculos
+   *    vienen de la derecha), asi que el fondo tambien, solo que mas lento. Eso es lo que
+   *    da sensacion de distancia.
+   *
+   * 2. LA COSTURA. Repetir la misma imagen deja un corte visible donde el borde derecho
+   *    choca con el izquierdo, porque no coinciden. Aca se repite ALTERNANDO la imagen
+   *    con su reflejo: el borde derecho empalma con su propio espejo, o sea consigo
+   *    mismo, y la union es continua por construccion. Encima va un degradado suave
+   *    centrado en cada empalme para disimular el pliegue de la simetria.
+   */
   function drawFondoImg(nombre, alpha, par) {
     var img = IMG[nombre];
     if (!img || alpha <= 0.002) return false;
@@ -627,28 +654,47 @@
     // "cover": llena la pantalla sin deformar la imagen.
     var escala = Math.max(V.pxW / img.width, V.pxH / img.height);
     var w = img.width * escala, h = img.height * escala;
-    var off = (-(S.scrollX * par) % w + w) % w;
     var y = (V.pxH - h) * 0.5;
+
+    var periodo = w * 2;                       // imagen + reflejo
+    var off = (X(S.scrollX) * par) % periodo;
+    if (off < 0) off += periodo;
+
+    var k0 = Math.floor(off / w);              // 0 o 1: si toca normal o reflejada
+    var xIni = -(off - k0 * w);                // en (-w, 0]
+
+    // Para comprobar la direccion sin depender de mirar pixeles. Se reutiliza el
+    // mismo objeto: crear uno por fotograma seria basura para el recolector.
+    S.dbgFondo.x = xIni; S.dbgFondo.off = off;
+    S.dbgFondo.w = w; S.dbgFondo.scroll = S.scrollX;
 
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.drawImage(img, -off, y, w, h);
-    if (off > 0) ctx.drawImage(img, -off + w, y, w, h);
+
+    var i = 0, x;
+    while ((x = xIni + i * w) < V.pxW && i < 12) {
+      baldosaFondo(img, x, y, w, h, ((k0 + i) % 2) === 1);
+      i++;
+    }
+
+    // Velo suave sobre cada empalme: el reflejo no deja salto, pero si un pliegue
+    // simetrico. Esto lo difumina sin ensuciar el resto de la imagen.
+    var banda = w * 0.16;
+    i = 0;
+    while ((x = xIni + i * w) < V.pxW + banda && i < 13) {
+      if (x > -banda) {
+        var g = ctx.createLinearGradient(x - banda, 0, x + banda, 0);
+        g.addColorStop(0, 'rgba(10,16,38,0)');
+        g.addColorStop(0.5, 'rgba(10,16,38,0.16)');
+        g.addColorStop(1, 'rgba(10,16,38,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x - banda, y, banda * 2, h);
+      }
+      i++;
+    }
+
     ctx.restore();
     return true;
-  }
-
-  // Un fotograma de una tira horizontal de `n` celdas.
-  function drawFrame(img, n, i, xPx, yPx, anchoPx, rot, alpha) {
-    var cw = img.width / n;
-    var esc = anchoPx / cw;
-    var ch = img.height * esc;
-    ctx.save();
-    ctx.translate(xPx, yPx);
-    if (rot) ctx.rotate(rot);
-    if (alpha !== undefined) ctx.globalAlpha = alpha;
-    ctx.drawImage(img, (i % n) * cw, 0, cw, img.height, -anchoPx / 2, -ch / 2, anchoPx, ch);
-    ctx.restore();
   }
 
   var stars = [];
@@ -699,7 +745,8 @@
         var tw = 0.55 + 0.45 * Math.sin(S.t * 1.6 + st.ph);
         ctx.globalAlpha = tw * B.star * 0.85;
         ctx.fillStyle = '#ffffff';
-        var sx = (st.x * V.pxW + (-S.scrollX * 0.6 * V.u) % V.pxW + V.pxW) % V.pxW;
+        // Hacia la izquierda, como todo lo demas.
+        var sx = (st.x * V.pxW - (X(S.scrollX) * 0.06) % V.pxW + V.pxW) % V.pxW;
         ctx.fillRect(sx, st.y * V.pxH, st.s * V.dpr, st.s * V.dpr);
       }
       ctx.globalAlpha = 1;
@@ -727,7 +774,8 @@
   }
 
   function hills(color, par, baseY, amp, freq) {
-    var off = -(S.scrollX * par) % (V.w * 2);
+    // Signo positivo: el relieve corre hacia la izquierda igual que el mundo.
+    var off = (S.scrollX * par) % (V.w * 2);
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(0, V.pxH);
@@ -801,18 +849,27 @@
     var x = X(m.x), y = X(m.y + Math.sin(S.t * 2 + m.ph) * 0.5);
     var grande = m.v > 1;
 
-    if (IMG.mota) {
-      // Cada mota lleva su propia fase para que no destellen todas al unisono.
-      var f = Math.floor((S.t * 9 + m.ph * 2)) % 4;
-      var alto = X(grande ? 7.5 : 5.0);
-      // El halo va debajo del sprite: le da presencia sobre un fondo oscuro.
-      var g0 = ctx.createRadialGradient(x, y, 0, x, y, alto * 0.9);
-      g0.addColorStop(0, grande ? 'rgba(255,212,94,0.45)' : 'rgba(255,240,184,0.30)');
+    if (IMG.polen) {
+      /*
+       * Una sola imagen limpia y el latido por codigo.
+       *
+       * Con los cuatro fotogramas dibujados a mano la mota saltaba de 29 a 86 pixeles
+       * entre cuadro y cuadro: eso no es un latido, es un parpadeo. Un seno sobre un
+       * unico sprite respira parejo y ademas cada mota lleva su propia fase, asi que
+       * no destellan todas a la vez.
+       */
+      var pulso = 1 + 0.10 * Math.sin(S.t * 3.0 + m.ph);
+      var d = X(grande ? 5.6 : 3.6) * pulso;
+
+      var halo = d * (1.15 + 0.18 * Math.sin(S.t * 3.0 + m.ph));
+      var g0 = ctx.createRadialGradient(x, y, 0, x, y, halo);
+      g0.addColorStop(0, grande ? 'rgba(255,212,94,0.50)' : 'rgba(255,236,170,0.34)');
       g0.addColorStop(1, 'rgba(255,240,184,0)');
       ctx.fillStyle = g0;
-      ctx.beginPath(); ctx.arc(x, y, alto * 0.9, 0, 6.2832); ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, halo, 0, 6.2832); ctx.fill();
 
-      drawFrame(IMG.mota, 4, f, x, y, alto * (IMG.mota.width / 4) / IMG.mota.height);
+      var dh = d * IMG.polen.height / IMG.polen.width;
+      ctx.drawImage(IMG.polen, x - d / 2, y - dh / 2, d, dh);
       return;
     }
 
@@ -830,6 +887,22 @@
     ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill();
   }
 
+  // La raiz del ala esta en el borde izquierdo de su imagen, a esta altura (medida
+  // sobre el archivo, no supuesta). Es el punto por el que gira.
+  var ALA_PIVOTE = 0.523;
+
+  // Gira el ala tomandola por la raiz. El scale(-1,1) la manda hacia ATRAS, porque el
+  // bicho mira a la derecha y el ala se le pega al lomo apuntando a la cola.
+  function dibujarAla(img, hx, hy, w, h, ang, alpha) {
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.scale(-1, 1);
+    ctx.rotate(ang);
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(img, 0, -h * ALA_PIVOTE, w, h);
+    ctx.restore();
+  }
+
   function drawBird() {
     var sk = skin();
     var x = X(birdX()), y = X(S.bird.y);
@@ -839,8 +912,8 @@
     // y la lista de objetivos, y flota. En su sitio de juego se montaba sobre el texto.
     if (S.mode === 'menu') {
       x = V.pxW / 2;
-      y = X(V.h * 0.455) + X(Math.sin(S.t * 1.6) * 0.9);
-      r = X(CFG.birdR * 1.25);
+      y = (S.menuMascotaY || X(V.h * 0.46)) + X(Math.sin(S.t * 1.6) * 0.9);
+      r = X(CFG.birdR * 1.15);
     }
 
     // halo: es lo que lleva el color de la "luz" elegida en la tienda
@@ -851,21 +924,54 @@
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(x, y, r * 5.5, 0, 6.2832); ctx.fill();
 
-    if (IMG.luciernaga) {
-      // Aletea sola a ritmo constante y se acelera al saltar: el aleteo rapido es lo
-      // que hace legible que el toque hizo algo.
-      var vel = S.bird.flapT > 0 ? 26 : 11;
-      var f = Math.floor(S.t * vel) % 4;
-      drawFrame(IMG.luciernaga, 4, f, x, y, r * 4.6, S.bird.rot * 0.5);
+    if (IMG.bicho && IMG.ala) {
+      /*
+       * El bicho se dibuja POR PIEZAS: cuerpo quieto y alas rotadas por codigo.
+       *
+       * Antes eran cuatro fotogramas dibujados por separado, y como cada uno salia con
+       * otro tamano y otras proporciones, el bicho crecia y se encogia al animarse.
+       * Rotando un ala sobre un cuerpo fijo el aleteo es continuo de verdad y el cuerpo
+       * no se mueve ni un pixel.
+       *
+       * Ademas asi el color SI cambia con la luz elegida: se tinen cuerpo y alas.
+       */
+      // Se tine con el color de la LUZ, no con el del cuerpo: los tonos de cuerpo son
+      // casi blancos y multiplicar por ellos no cambia nada, que es justo por lo que
+      // las luces no se distinguian entre si.
+      var cuerpo = ASSETS.tinte(IMG.bicho, sk.glow, 0.72);
+      var alaImg = ASSETS.tinte(IMG.ala, sk.glow, 0.45);
 
-      // Un punto de luz del color de la skin sobre el farolito de la cola.
+      var bw = r * 4.4;
+      var bh = bw * IMG.bicho.height / IMG.bicho.width;
+
+      // Bate solo, y mas rapido durante el salto: el aleteo rapido es lo que hace
+      // legible que el toque hizo algo.
+      var vel = S.bird.flapT > 0 ? 34 : 16;
+      var ang = 0.30 + 0.52 * Math.sin(S.t * vel);
+
+      var ww = bw * 0.80;
+      var wh = ww * IMG.ala.height / IMG.ala.width;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(S.bird.rot * 0.45);
+
+      var hx = bw * 0.10, hy = -bh * 0.40;          // el hombro, sobre el lomo
+      dibujarAla(alaImg, hx, hy, ww, wh, ang - 0.34, 0.42);   // ala de atras
+      ctx.drawImage(cuerpo, -bw / 2, -bh / 2, bw, bh);
+      dibujarAla(alaImg, hx, hy, ww, wh, ang, 0.82);          // ala de delante
+
+      ctx.restore();
+
+      // Farolito de la cola encendido con el color de la luz elegida.
+      var lx = x - r * 1.55, ly = y + r * 0.18;
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      var gb = ctx.createRadialGradient(x - r * 1.1, y + r * 0.35, 0, x - r * 1.1, y + r * 0.35, r * 1.5);
-      gb.addColorStop(0, sk.glow + 'aa');
+      var gb = ctx.createRadialGradient(lx, ly, 0, lx, ly, r * 1.7);
+      gb.addColorStop(0, sk.glow + 'bb');
       gb.addColorStop(1, sk.glow + '00');
       ctx.fillStyle = gb;
-      ctx.beginPath(); ctx.arc(x - r * 1.1, y + r * 0.35, r * 1.5, 0, 6.2832); ctx.fill();
+      ctx.beginPath(); ctx.arc(lx, ly, r * 1.7, 0, 6.2832); ctx.fill();
       ctx.restore();
       return;
     }
@@ -1066,13 +1172,22 @@
   }
 
   function drawHUD() {
-    // polen arriba a la derecha
-    var px = V.pxW - X(3.2);
-    pollenIcon(px, X(4.2), X(1.0));
-    shadowText(String(S.save.coins), px - X(2.2), X(4.2), 2.7, '#ffe9b8', 'right');
+    // Contador de polen arriba a la derecha, sobre una pastilla oscura: sin ella el
+    // numero se pierde encima de los biomas de cielo claro.
+    var txt = String(S.save.coins);
+    var tw = textWidth(txt, 2.7);
+    var px = V.pxW - X(2.4);
+    var pw = tw + X(6.2), ph = X(5.4);
+    var pxIni = px - pw, pyIni = X(1.6);
+
+    ctx.fillStyle = 'rgba(6,10,24,0.42)';
+    rrect(pxIni, pyIni, pw, ph, ph / 2); ctx.fill();
+
+    pollenIcon(px - X(2.2), pyIni + ph / 2, X(0.95));
+    text(txt, px - X(4.4), pyIni + ph / 2, 2.7, '#ffe9b8', 'right');
 
     if (S.mode === 'play') {
-      shadowText(String(S.score), V.pxW / 2, X(8), 8, '#ffffff');
+      shadowText(String(S.score), V.pxW / 2, X(9), 8, '#ffffff');
     }
   }
 
@@ -1099,33 +1214,57 @@
       abajoTitulo = yTitulo + X(4.5);
     }
 
-    // El texto cuelga del BORDE del titulo, no de una fraccion fija de la pantalla:
-    // el logo cambia de alto segun el ancho y si no, se le monta encima.
-    shadowText(T('tap'), cx, abajoTitulo + X(4.5), 3, 'rgba(255,255,255,0.78)');
-    shadowText(T('best') + ' ' + S.save.best, cx, abajoTitulo + X(10), 3, 'rgba(255,255,255,0.55)');
+    // TODO el menu cuelga del borde de abajo del titulo, no de fracciones fijas de la
+    // pantalla: el logo cambia de alto segun el ancho y si no, las cosas se pisan.
+    shadowText(T('tap'), cx, abajoTitulo + X(4.5), 3, 'rgba(255,255,255,0.80)');
+    shadowText(T('best') + ' ' + S.save.best, cx, abajoTitulo + X(10), 3, 'rgba(255,255,255,0.58)');
+    S.menuMascotaY = abajoTitulo + X(17);
 
     // objetivos
     var ms = S.save.missions || [];
-    var top = V.h * 0.55;
-    shadowText(T('missions'), cx, X(top - 3.2), 2.4, 'rgba(255,255,255,0.5)');
+    var top = (abajoTitulo + X(31)) / V.u;
+    shadowText(T('missions'), cx, X(top - 3.4), 2.4, 'rgba(255,255,255,0.55)');
     for (var i = 0; i < ms.length; i++) {
       var m = ms[i];
-      var y = top + i * 5.2;
+      var y = top + i * 5.6;
       var w = Math.min(V.w * 0.8, 52);
       var x = V.w / 2 - w / 2;
-      ctx.fillStyle = 'rgba(255,255,255,0.08)';
-      rrect(X(x), X(y), X(w), X(4.2), X(1.2)); ctx.fill();
+      var hh = 4.6;
       var prog = clamp(m.n / m.goal, 0, 1);
-      ctx.fillStyle = m.ok ? 'rgba(140,255,200,0.35)' : 'rgba(255,224,138,0.28)';
-      rrect(X(x), X(y), X(w * prog), X(4.2), X(1.2)); ctx.fill();
-      text(missionLabel(m), X(x + 2), X(y + 2.1), 2.1, 'rgba(255,255,255,0.92)', 'left');
-      if (m.ok) {
-        // Cumplido: estrella en vez de la recompensa. Se lee de un vistazo.
-        if (!drawIcono(ICONO.ESTRELLA, X(x + w - 3), X(y + 2.1), X(3.4))) {
-          text('+' + m.rw, X(x + w - 2), X(y + 2.1), 2.1, '#8effc8', 'right');
+
+      if (IMG.boton && IMG.botonPulsado) {
+        // La barra es la MISMA placa dos veces: la hundida y oscura de base, y encima
+        // la clara recortada al avance. Asi el objetivo se va "encendiendo" con la
+        // misma madera del resto de la interfaz, sin inventar otro estilo.
+        drawPlaca(IMG.botonPulsado, X(x), X(y), X(w), X(hh));
+        if (prog > 0.002) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(X(x), X(y), X(w * prog), X(hh));
+          ctx.clip();
+          drawPlaca(IMG.boton, X(x), X(y), X(w), X(hh));
+          ctx.restore();
         }
       } else {
-        text('+' + m.rw, X(x + w - 2), X(y + 2.1), 2.1, '#ffe08a', 'right');
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        rrect(X(x), X(y), X(w), X(hh), X(1.2)); ctx.fill();
+        ctx.fillStyle = m.ok ? 'rgba(140,255,200,0.35)' : 'rgba(255,224,138,0.28)';
+        rrect(X(x), X(y), X(w * prog), X(hh), X(1.2)); ctx.fill();
+      }
+      // El texto sobre madera va oscuro; sobre el respaldo translucido, claro.
+      var sobreMadera = !!(IMG.boton && IMG.botonPulsado);
+      var colTxt = sobreMadera ? (prog > 0.35 ? '#4a2c12' : '#e8d6b8') : 'rgba(255,255,255,0.92)';
+      var cyFila = X(y + hh / 2);
+      text(missionLabel(m), X(x + 3), cyFila, 2.1, colTxt, 'left');
+      if (m.ok) {
+        // Cumplido: estrella en vez de la recompensa. Se lee de un vistazo.
+        if (!drawIcono(ICONO.ESTRELLA, X(x + w - 4.2), cyFila, X(3.4))) {
+          text('+' + m.rw, X(x + w - 3), cyFila, 2.1, '#8effc8', 'right');
+        }
+      } else {
+        var numW = textWidth('+' + m.rw, 2.1);
+        text('+' + m.rw, X(x + w - 3.2), cyFila, 2.1, sobreMadera ? '#6b4a1e' : '#ffe08a', 'right');
+        pollenIcon(X(x + w - 3.2) - numW - X(1.6), cyFila, X(0.85));
       }
     }
 
@@ -1139,10 +1278,19 @@
 
     var cx = V.pxW / 2;
     var top = V.h * 0.24;
-    shadowText(String(S.score), cx, X(top), 11, '#ffffff');
-    shadowText(T('best') + ' ' + S.save.best, cx, X(top + 8), 2.8, 'rgba(255,255,255,0.6)');
 
-    pollenIcon(cx - X(3), X(top + 14), X(1.1));
+    // El resultado va dentro del marco de madera, no flotando sobre el velo: es el
+    // momento en que el jugador decide si sigue, y tiene que sentirse una pantalla.
+    if (IMG.panel) {
+      var pw = Math.min(V.w * 0.74, 54);
+      var ph = pw * 0.72;
+      ctx.drawImage(IMG.panel, cx - X(pw) / 2, X(top - 9), X(pw), X(ph));
+    }
+
+    shadowText(String(S.score), cx, X(top), 11, '#ffffff');
+    shadowText(T('best') + ' ' + S.save.best, cx, X(top + 8), 2.8, 'rgba(255,255,255,0.65)');
+
+    pollenIcon(cx - X(3.4), X(top + 14), X(1.1));
     shadowText('+' + S.runPollen, cx + X(1.5), X(top + 14), 3.2, '#ffe9b8', 'left');
 
     var bw = Math.min(V.w * 0.62, 38);
@@ -1394,8 +1542,9 @@
     fondoAlba:   'assets/fondo-alba.webp',
     fondoBruma:  'assets/fondo-bruma.webp',
     fondoAurora: 'assets/fondo-aurora.webp',
-    luciernaga:  'assets/luciernaga.webp',
-    mota:        'assets/mota.webp',
+    bicho:       'assets/bicho.webp',
+    ala:         'assets/ala.webp',
+    polen:       'assets/polen.webp',
     boton:       'assets/boton.webp',
     botonPulsado:'assets/boton-pulsado.webp',
     panel:       'assets/panel.webp',

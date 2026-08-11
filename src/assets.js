@@ -35,6 +35,46 @@
     });
   }
 
+  /* ---------------- tintado de sprites ---------------- */
+  /*
+   * Devuelve una copia coloreada de una imagen, conservando el sombreado y el contorno.
+   *
+   * El truco es 'multiply': multiplicar por un color claro tine las zonas claras y deja
+   * las oscuras oscuras, que es justo lo que hace que siga pareciendo el mismo dibujo y
+   * no una silueta plana. Despues 'destination-in' devuelve el alfa original, porque el
+   * fillRect habia pintado tambien el vacio.
+   *
+   * Se cachea por imagen+color: tintar en cada fotograma seria carisimo.
+   */
+  var _tintes = {};
+  var _tintesOrden = [];
+
+  function tinte(img, color, fuerza) {
+    if (!img) return null;
+    if (fuerza === undefined) fuerza = 1;
+    var clave = (img.src || 'img') + '|' + color + '|' + fuerza;
+    if (_tintes[clave]) return _tintes[clave];
+
+    var c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    var x = c.getContext('2d');
+
+    x.drawImage(img, 0, 0);
+    x.globalCompositeOperation = 'multiply';
+    x.globalAlpha = fuerza;
+    x.fillStyle = color;
+    x.fillRect(0, 0, c.width, c.height);
+
+    x.globalAlpha = 1;
+    x.globalCompositeOperation = 'destination-in';
+    x.drawImage(img, 0, 0);
+
+    _tintes[clave] = c;
+    _tintesOrden.push(clave);
+    while (_tintesOrden.length > 24) delete _tintes[_tintesOrden.shift()];
+    return c;
+  }
+
   /* ---------------- tipografia de mapa de bits ---------------- */
   /*
    * La hoja viene como mascara: blanco solido con alfa = tinta. Para pintarla de un
@@ -133,5 +173,5 @@
     }
   };
 
-  global.ASSETS = { IMG: IMG, listo: listo, cargar: cargar, Fuente: Fuente };
+  global.ASSETS = { IMG: IMG, listo: listo, cargar: cargar, tinte: tinte, Fuente: Fuente };
 })(window);
