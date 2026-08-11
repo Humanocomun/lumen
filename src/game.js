@@ -889,7 +889,11 @@
 
   // La raiz del ala esta en el borde izquierdo de su imagen, a esta altura (medida
   // sobre el archivo, no supuesta). Es el punto por el que gira.
-  var ALA_PIVOTE = 0.523;
+  var ALA_PIVOTE = 0.520;
+
+  // Cuanto se mete la raiz del ala DENTRO del cuerpo. Sin esto el ala nace justo en el
+  // borde del lomo y se lee como una pieza suelta flotando al lado del bicho.
+  var ALA_ENCASTRE = 0.16;
 
   // Gira el ala tomandola por la raiz. El scale(-1,1) la manda hacia ATRAS, porque el
   // bicho mira a la derecha y el ala se le pega al lomo apuntando a la cola.
@@ -899,7 +903,7 @@
     ctx.scale(-1, 1);
     ctx.rotate(ang);
     ctx.globalAlpha = alpha;
-    ctx.drawImage(img, 0, -h * ALA_PIVOTE, w, h);
+    ctx.drawImage(img, -w * ALA_ENCASTRE, -h * ALA_PIVOTE, w, h);
     ctx.restore();
   }
 
@@ -947,16 +951,18 @@
       // Bate solo, y mas rapido durante el salto: el aleteo rapido es lo que hace
       // legible que el toque hizo algo.
       var vel = S.bird.flapT > 0 ? 34 : 16;
-      var ang = 0.30 + 0.52 * Math.sin(S.t * vel);
+      var ang = 0.34 + 0.38 * Math.sin(S.t * vel);
 
-      var ww = bw * 0.80;
+      var ww = bw * 0.72;
       var wh = ww * IMG.ala.height / IMG.ala.width;
 
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(S.bird.rot * 0.45);
 
-      var hx = bw * 0.10, hy = -bh * 0.40;          // el hombro, sobre el lomo
+      // El hombro va DENTRO de la silueta, sobre el torax: si se pone en el borde de
+      // arriba, el ala queda despegada y parecen dos dibujos distintos.
+      var hx = -bw * 0.04, hy = -bh * 0.12;
       dibujarAla(alaImg, hx, hy, ww, wh, ang - 0.34, 0.42);   // ala de atras
       ctx.drawImage(cuerpo, -bw / 2, -bh / 2, bw, bh);
       dibujarAla(alaImg, hx, hy, ww, wh, ang, 0.82);          // ala de delante
